@@ -8,10 +8,11 @@ app.use(express.json());
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || "secret123";
 
+/* BANCO EM MEMÓRIA */
 const codes = [];
-const activations = {};
+const activations = {}; // key -> deviceId
 
 app.get("/", (req,res)=>res.send("Auth server running"));
 
@@ -34,7 +35,7 @@ function requireAdmin(req,res,next){
     if(p.role!=="admin") throw "";
     next();
   }catch{
-    res.status(401).end();
+    res.status(401).json({error:"unauthorized"});
   }
 }
 
@@ -50,22 +51,35 @@ app.get("/admin/codes",requireAdmin,(req,res)=>{
   res.json(codes);
 });
 
-/* ATIVAÇÃO (1 PC) */
+/* ATIVAÇÃO */
 app.post("/redeem",(req,res)=>{
-  const {code,deviceId} = req.body;
+  const {key,deviceId} = req.body;
 
-  const found = codes.find(c=>c.code===code);
+  if(!key || !deviceId)
+    return res.status(400).json({error:"missing data"});
+
+  const found = codes.find(c=>c.code===key);
 
   if(!found || found.used)
     return res.status(400).json({error:"invalid code"});
 
-  if(activations[deviceId])
-    return res.status(409).json({error:"device already used"});
+  if(activations[key])
+    return res.status(409).json({error:"code already used on another device"});
 
   found.used = true;
-  activations[deviceId] = true;
+  activations[key] = deviceId;
 
   res.json({activated:true});
+});
+
+/* VALIDAR LICENÇA */
+app.post("/validate",(req,res)=>{
+  const {key,deviceId} = req.body;
+
+  if(activations[key]===deviceId)
+    return res.json({valid:true});
+
+  res.json({valid:false});
 });
 
 app.listen(process.env.PORT || 10000,()=>console.log("running"));
