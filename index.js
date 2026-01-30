@@ -20,7 +20,14 @@ app.get("/", (req,res)=>res.send("Auth server running"));
 app.post("/admin/login",(req,res)=>{
   const {email,password} = req.body;
 
-  if(email!==ADMIN_EMAIL || password!==ADMIN_PASSWORD)
+  // normaliza para evitar erro por espaço/maiúscula
+  const e = String(email || "").trim().toLowerCase();
+  const p = String(password || "").trim();
+
+  const adminE = String(ADMIN_EMAIL || "").trim().toLowerCase();
+  const adminP = String(ADMIN_PASSWORD || "").trim();
+
+  if(e !== adminE || p !== adminP)
     return res.status(401).json({success:false});
 
   const token = jwt.sign({role:"admin"},JWT_SECRET,{expiresIn:"12h"});
@@ -31,8 +38,8 @@ app.post("/admin/login",(req,res)=>{
 function requireAdmin(req,res,next){
   const t = (req.headers.authorization||"").replace("Bearer ","");
   try{
-    const p = jwt.verify(t,JWT_SECRET);
-    if(p.role!=="admin") throw "";
+    const payload = jwt.verify(t,JWT_SECRET);
+    if(payload.role!=="admin") throw "";
     next();
   }catch{
     res.status(401).json({error:"unauthorized"});
@@ -51,6 +58,21 @@ app.get("/admin/codes",requireAdmin,(req,res)=>{
   res.json(codes);
 });
 
+/* RESETAR LICENÇA (LIBERAR CÓDIGO PRA OUTRO PC) */
+app.post("/admin/reset", requireAdmin, (req, res) => {
+  const key = String(req.body?.key || "").trim().toUpperCase();
+  if (!key) return res.status(400).json({ error: "missing key" });
+
+  // libera o vínculo do código com o device
+  delete activations[key];
+
+  // marca o código como não usado novamente
+  const found = codes.find(c => c.code === key);
+  if (found) found.used = false;
+
+  res.json({ ok: true, reset: key });
+});
+
 /* ATIVAÇÃO */
 app.post("/redeem",(req,res)=>{
   const {key,deviceId} = req.body;
@@ -58,16 +80,19 @@ app.post("/redeem",(req,res)=>{
   if(!key || !deviceId)
     return res.status(400).json({error:"missing data"});
 
-  const found = codes.find(c=>c.code===key);
+  const k = String(key).trim().toUpperCase();
+  const d = String(deviceId).trim();
+
+  const found = codes.find(c=>c.code===k);
 
   if(!found || found.used)
     return res.status(400).json({error:"invalid code"});
 
-  if(activations[key])
+  if(activations[k])
     return res.status(409).json({error:"code already used on another device"});
 
   found.used = true;
-  activations[key] = deviceId;
+  activations[k] = d;
 
   res.json({activated:true});
 });
@@ -76,7 +101,10 @@ app.post("/redeem",(req,res)=>{
 app.post("/validate",(req,res)=>{
   const {key,deviceId} = req.body;
 
-  if(activations[key]===deviceId)
+  const k = String(key || "").trim().toUpperCase();
+  const d = String(deviceId || "").trim();
+
+  if(activations[k]===d)
     return res.json({valid:true});
 
   res.json({valid:false});
